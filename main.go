@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -165,52 +166,6 @@ func extractSerialName(fileName string) string {
 	return ""
 }
 
-func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) error {
-	file, err := os.Create(outputFile)
-	if err != nil {
-		return fmt.Errorf("unable to create output file: %w", err)
-	}
-	defer file.Close()
-
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Write header
-	err = writer.Write([]string{"task_name-description", "lower_limit", "upper_limit", "grr_percentage"})
-	if err != nil {
-		return fmt.Errorf("error writing header: %w", err)
-	}
-
-	// Write grouped data
-	for key, tests := range groupedTests {
-		parts := strings.Split(key, "|")
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid key format: %s", key)
-		}
-		taskName, description := parts[0], parts[1]
-
-		// Calculate GR&R (based solely on repeatability for single actor/part)
-		values := []float64{}
-		for _, test := range tests {
-			values = append(values, test.Value)
-		}
-		repeatability := math.Sqrt(calculateVariance(values))
-		grrPercentage := (repeatability / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
-
-		err = writer.Write([]string{
-			fmt.Sprintf("%s-%s", taskName, description),
-			fmt.Sprintf("%.2f", tests[0].LowerLimit),
-			fmt.Sprintf("%.2f", tests[0].UpperLimit),
-			fmt.Sprintf("%.2f", grrPercentage),
-		})
-		if err != nil {
-			return fmt.Errorf("error writing row: %w", err)
-		}
-	}
-
-	return nil
-}
-
 func calculateVariance(values []float64) float64 {
 	mean := calculateMean(values)
 	var sum float64
@@ -226,4 +181,74 @@ func calculateMean(values []float64) float64 {
 		sum += v
 	}
 	return sum / float64(len(values))
+}
+func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) error {
+	// Temporary storage for sorted data
+	type ResultRow struct {
+		TaskDescription string
+		LowerLimit      float64
+		UpperLimit      float64
+		GRRPercentage   float64
+	}
+	var results []ResultRow
+
+	// Group and calculate GR&R
+	for key, tests := range groupedTests {
+		parts := strings.Split(key, "|")
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid key format: %s", key)
+		}
+		taskName, description := parts[0], parts[1]
+
+		// Calculate GR&R (based solely on repeatability for single actor/part)
+		values := []float64{}
+		for _, test := range tests {
+			values = append(values, test.Value)
+		}
+		repeatability := math.Sqrt(calculateVariance(values))
+		grrPercentage := (repeatability / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
+
+		results = append(results, ResultRow{
+			TaskDescription: fmt.Sprintf("%s-%s", taskName, description),
+			LowerLimit:      tests[0].LowerLimit,
+			UpperLimit:      tests[0].UpperLimit,
+			GRRPercentage:   grrPercentage,
+		})
+	}
+
+	// Sort results by GRR percentage in descending order
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].GRRPercentage > results[j].GRRPercentage
+	})
+
+	// Write results to CSV
+	file, err := os.Create("grr_summary.csv")
+	if err != nil {
+		return fmt.Errorf("unable to create output file: %w", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write header
+	err = writer.Write([]string{"task_name-description", "lower_limit", "upper_limit", "grr_percentage"})
+	if err != nil {
+		return fmt.Errorf("error writing header: %w", err)
+	}
+
+	// Write sorted data
+	for _, row := range results {
+		err = writer.Write([]string{
+			row.TaskDescription,
+			fmt.Sprintf("%.2f", row.LowerLimit),
+			fmt.Sprintf("%.2f", row.UpperLimit),
+			fmt.Sprintf("%.2f", row.GRRPercentage),
+		})
+		if err != nil {
+			return fmt.Errorf("error writing row: %w", err)
+		}
+	}
+
+	return nil
 }
