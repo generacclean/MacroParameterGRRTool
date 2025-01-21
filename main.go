@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -14,14 +15,16 @@ import (
 )
 
 type TestRow struct {
-	TaskName    string
-	Description string
-	Comparator  string
-	Value       float64
-	LowerLimit  float64
-	UpperLimit  float64
-	SerialName  string
+	parameterName string
+	Description   string
+	Comparator    string
+	Value         float64
+	LowerLimit    float64
+	UpperLimit    float64
+	SerialName    string
 }
+
+const d2 = 2.353 // For one operator,5 parts, 6 runs, d2 = 2.353 https://andrewmilivojevich.com/d2-values-for-the-distribution-of-the-average-range/
 
 func main() {
 	// Get all CSV files in the working directory
@@ -46,10 +49,10 @@ func main() {
 			continue
 		}
 
-		// Group tests by unique task_name and description combination
+		// Group tests by unique parameter_name and description combination
 		for _, test := range tests {
 			if test.Comparator == "GELE" {
-				key := fmt.Sprintf("%s|%s", test.TaskName, test.Description)
+				key := fmt.Sprintf("%s|%s", test.parameterName, test.Description)
 				groupedTests[key] = append(groupedTests[key], test)
 			}
 		}
@@ -103,14 +106,14 @@ func processCSV(filePath string, serialName string) ([]TestRow, error) {
 
 	// Get column indices
 	headers := records[0]
-	taskNameIdx := indexOf(headers, "task_name")
+	parameterNameIdx := indexOf(headers, "parameter_name")
 	descriptionIdx := indexOf(headers, "description")
 	comparatorIdx := indexOf(headers, "comparator")
 	valueIdx := indexOf(headers, "value")
 	lowerLimitIdx := indexOf(headers, "lower_limit")
 	upperLimitIdx := indexOf(headers, "upper_limit")
 
-	if taskNameIdx == -1 || descriptionIdx == -1 || comparatorIdx == -1 || valueIdx == -1 || lowerLimitIdx == -1 || upperLimitIdx == -1 {
+	if parameterNameIdx == -1 || descriptionIdx == -1 || comparatorIdx == -1 || valueIdx == -1 || lowerLimitIdx == -1 || upperLimitIdx == -1 {
 		return nil, fmt.Errorf("missing required columns in file: %s", filePath)
 	}
 
@@ -141,13 +144,13 @@ func processCSV(filePath string, serialName string) ([]TestRow, error) {
 		}
 
 		tests = append(tests, TestRow{
-			TaskName:    record[taskNameIdx],
-			Description: record[descriptionIdx],
-			Comparator:  record[comparatorIdx],
-			Value:       value,
-			LowerLimit:  lowerLimit,
-			UpperLimit:  upperLimit,
-			SerialName:  serialName,
+			parameterName: record[parameterNameIdx],
+			Description:   record[descriptionIdx],
+			Comparator:    record[comparatorIdx],
+			Value:         value,
+			LowerLimit:    lowerLimit,
+			UpperLimit:    upperLimit,
+			SerialName:    serialName,
 		})
 	}
 
@@ -195,6 +198,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		LowerLimit      float64
 		UpperLimit      float64
 		GRRPercentage   float64
+		GRP             float64
 	}
 	var results []ResultRow
 
@@ -204,7 +208,36 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid key format: %s", key)
 		}
-		taskName, description := parts[0], parts[1]
+		parameterName, description := parts[0], parts[1]
+
+		// Group by serial name and calculate ranges
+		serialRanges := make(map[string]float64)
+		for _, test := range tests {
+			serialRanges[test.SerialName] = 0
+		}
+		for serial := range serialRanges {
+			var values []float64
+			for _, test := range tests {
+				if test.SerialName == serial {
+					values = append(values, test.Value)
+				}
+			}
+			if len(values) > 0 {
+				maxValue := max(values)
+				minValue := min(values)
+				serialRanges[serial] = maxValue - minValue
+			}
+
+		}
+
+		// Calculate total mean range and GRP
+		var totalRangeSum float64
+		for _, r := range serialRanges {
+			totalRangeSum += r
+		}
+		totalMeanRange := totalRangeSum / float64(len(serialRanges))
+		k2 := 1 / d2
+		gr := totalMeanRange * k2
 
 		// Calculate GR&R (based solely on repeatability for single actor/part)
 		values := []float64{}
@@ -213,12 +246,13 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		}
 		repeatability := math.Sqrt(calculateVariance(values))
 		grrPercentage := (repeatability / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
-
+		grp := (gr / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
 		results = append(results, ResultRow{
-			TaskDescription: fmt.Sprintf("%s-%s", taskName, description),
+			TaskDescription: fmt.Sprintf("%s-%s", parameterName, description),
 			LowerLimit:      tests[0].LowerLimit,
 			UpperLimit:      tests[0].UpperLimit,
 			GRRPercentage:   grrPercentage,
+			GRP:             grp,
 		})
 	}
 
@@ -238,7 +272,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	defer writer.Flush()
 
 	// Write header
-	err = writer.Write([]string{"task_name-description", "lower_limit", "upper_limit", "grr_percentage"})
+	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "grr_percentage", "grp"})
 	if err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
@@ -250,6 +284,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 			fmt.Sprintf("%.2f", row.LowerLimit),
 			fmt.Sprintf("%.2f", row.UpperLimit),
 			fmt.Sprintf("%.2f", row.GRRPercentage),
+			fmt.Sprintf("%.4f", row.GRP),
 		})
 		if err != nil {
 			return fmt.Errorf("error writing row: %w", err)
@@ -258,6 +293,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 
 	return nil
 }
+
 func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
 	file, err := os.Create(outputFile)
 	if err != nil {
@@ -269,7 +305,7 @@ func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
 	defer writer.Flush()
 
 	// Write header
-	err = writer.Write([]string{"serial_name", "task_name", "description", "comparator", "value", "lower_limit", "upper_limit"})
+	err = writer.Write([]string{"serial_name", "parameter_name", "description", "comparator", "value", "lower_limit", "upper_limit"})
 	if err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
@@ -279,7 +315,7 @@ func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
 		for _, test := range tests {
 			err = writer.Write([]string{
 				test.SerialName,
-				test.TaskName,
+				test.parameterName,
 				test.Description,
 				test.Comparator,
 				fmt.Sprintf("%.2f", test.Value),
@@ -293,4 +329,37 @@ func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
 	}
 
 	return nil
+}
+func max(values []float64) float64 {
+	if len(values) == 0 {
+		log.Fatal("max: slice is empty")
+	}
+	maxVal := values[0]
+	for _, v := range values {
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return maxVal
+}
+
+func min(values []float64) float64 {
+	if len(values) == 0 {
+		log.Fatal("min: slice is empty")
+	}
+	minVal := values[0]
+	for _, v := range values {
+		if v < minVal {
+			minVal = v
+		}
+	}
+	return minVal
+}
+func getGitHash() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("error retrieving git hash: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
