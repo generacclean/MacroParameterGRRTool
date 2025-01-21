@@ -24,16 +24,31 @@ type TestRow struct {
 	SerialName    string
 }
 
-const d2 = 2.353 // For one operator,5 parts, 6 runs, d2 = 2.353 https://andrewmilivojevich.com/d2-values-for-the-distribution-of-the-average-range/
+const d2 = 2.353   // For one operator,5 parts, 6 runs, d2 = 2.353 https://andrewmilivojevich.com/d2-values-for-the-distribution-of-the-average-range/
+var gitHash string // Git hash, set during build or retrieved at runtime
 
 func main() {
-	// Get all CSV files in the working directory
+	// Check if the Git hash is set during build
+	if gitHash == "" {
+		// Attempt to retrieve the Git hash at runtime
+		hash, err := getGitHash()
+		if err != nil {
+			log.Printf("Warning: Unable to retrieve Git hash at runtime: %v", err)
+			gitHash = "unknown"
+		} else {
+			gitHash = hash
+		}
+	}
+
+	fmt.Printf("Running with Git hash: %s\n", gitHash)
+
+	// Proceed with the rest of the program
 	csvFiles, err := getCSVFiles(".")
 	if err != nil {
 		log.Fatalf("Error retrieving CSV files: %v", err)
 	}
 
-	// Process each CSV file and aggregate data
+	// Process files and write results
 	groupedTests := make(map[string][]TestRow)
 	for _, file := range csvFiles {
 		serialName := extractSerialName(file)
@@ -42,7 +57,6 @@ func main() {
 			continue
 		}
 
-		fmt.Printf("Processing file: %s\n", file)
 		tests, err := processCSV(file, serialName)
 		if err != nil {
 			log.Printf("Error processing file %s: %v", file, err)
@@ -71,6 +85,15 @@ func main() {
 		log.Fatalf("Error writing raw data: %v", err)
 	}
 	fmt.Println("Raw data written to raw_data.csv")
+}
+
+func getGitHash() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("error retrieving git hash: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 func getCSVFiles(dir string) ([]string, error) {
@@ -192,6 +215,12 @@ func calculateMean(values []float64) float64 {
 	return sum / float64(len(values))
 }
 func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) error {
+	// Get the Git hash
+	gitHash, err := getGitHash()
+	if err != nil {
+		return fmt.Errorf("failed to retrieve git hash: %w", err)
+	}
+
 	// Temporary storage for sorted data
 	type ResultRow struct {
 		TaskDescription string
@@ -227,7 +256,6 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 				minValue := min(values)
 				serialRanges[serial] = maxValue - minValue
 			}
-
 		}
 
 		// Calculate total mean range and GRP
@@ -271,6 +299,12 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
+	// Write Git hash as a comment at the top
+	_, err = file.WriteString(fmt.Sprintf("# Script Git Hash: %s\n", gitHash))
+	if err != nil {
+		return fmt.Errorf("error writing git hash: %w", err)
+	}
+
 	// Write header
 	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "grr_percentage", "grp"})
 	if err != nil {
@@ -285,6 +319,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 			fmt.Sprintf("%.2f", row.UpperLimit),
 			fmt.Sprintf("%.2f", row.GRRPercentage),
 			fmt.Sprintf("%.4f", row.GRP),
+			gitHash,
 		})
 		if err != nil {
 			return fmt.Errorf("error writing row: %w", err)
@@ -354,12 +389,4 @@ func min(values []float64) float64 {
 		}
 	}
 	return minVal
-}
-func getGitHash() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", fmt.Errorf("error retrieving git hash: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
 }
