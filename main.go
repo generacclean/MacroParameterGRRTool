@@ -55,13 +55,19 @@ func main() {
 		}
 	}
 
-	// Write grouped results to a new CSV file
-	err = writeGroupedResults("grouped_results_single_actor.csv", groupedTests)
+	// Write grouped results
+	err = writeGroupedResults("grr_summary.csv", groupedTests)
 	if err != nil {
 		log.Fatalf("Error writing grouped results: %v", err)
 	}
+	fmt.Println("Grouped results written to grr_summary.csv")
 
-	fmt.Println("Grouped results written to grouped_results_single_actor.csv")
+	// Write raw data
+	err = writeRawData("raw_data.csv", groupedTests)
+	if err != nil {
+		log.Fatalf("Error writing raw data: %v", err)
+	}
+	fmt.Println("Raw data written to raw_data.csv")
 }
 
 func getCSVFiles(dir string) ([]string, error) {
@@ -158,7 +164,7 @@ func indexOf(headers []string, column string) int {
 }
 
 func extractSerialName(fileName string) string {
-	re := regexp.MustCompile(`_[A-Z0-9]{10,}_`)
+	re := regexp.MustCompile(`_[a-zA-Z0-9]{14}_`)
 	match := re.FindString(fileName)
 	if match != "" {
 		return strings.Trim(match, "_")
@@ -222,7 +228,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	})
 
 	// Write results to CSV
-	file, err := os.Create("grr_summary.csv")
+	file, err := os.Create(outputFile)
 	if err != nil {
 		return fmt.Errorf("unable to create output file: %w", err)
 	}
@@ -247,6 +253,42 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		})
 		if err != nil {
 			return fmt.Errorf("error writing row: %w", err)
+		}
+	}
+
+	return nil
+}
+func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
+	file, err := os.Create(outputFile)
+	if err != nil {
+		return fmt.Errorf("unable to create output file: %w", err)
+	}
+	defer file.Close()
+
+	writer := csv.NewWriter(file)
+	defer writer.Flush()
+
+	// Write header
+	err = writer.Write([]string{"serial_name", "task_name", "description", "comparator", "value", "lower_limit", "upper_limit"})
+	if err != nil {
+		return fmt.Errorf("error writing header: %w", err)
+	}
+
+	// Write all raw data rows
+	for _, tests := range groupedTests {
+		for _, test := range tests {
+			err = writer.Write([]string{
+				test.SerialName,
+				test.TaskName,
+				test.Description,
+				test.Comparator,
+				fmt.Sprintf("%.2f", test.Value),
+				fmt.Sprintf("%.2f", test.LowerLimit),
+				fmt.Sprintf("%.2f", test.UpperLimit),
+			})
+			if err != nil {
+				return fmt.Errorf("error writing row: %w", err)
+			}
 		}
 	}
 
