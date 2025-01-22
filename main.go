@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"log"
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +21,7 @@ type TestRow struct {
 	LowerLimit    float64
 	UpperLimit    float64
 	SerialName    string
+	Filename      string
 }
 
 const d2 = 2.353   // For one operator,5 parts, 6 runs, d2 = 2.353 https://andrewmilivojevich.com/d2-values-for-the-distribution-of-the-average-range/
@@ -174,6 +174,7 @@ func processCSV(filePath string, serialName string) ([]TestRow, error) {
 			LowerLimit:    lowerLimit,
 			UpperLimit:    upperLimit,
 			SerialName:    serialName,
+			Filename:      filePath,
 		})
 	}
 
@@ -223,11 +224,13 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 
 	// Temporary storage for sorted data
 	type ResultRow struct {
-		TaskDescription string
-		LowerLimit      float64
-		UpperLimit      float64
-		GRRPercentage   float64
-		GRP             float64
+		TaskDescription        string
+		LowerLimit             float64
+		UpperLimit             float64
+		Repeatability          float64
+		Reproducability        float64
+		TotalGRR               float64
+		GRRTolerancePercentage float64
 	}
 	var results []ResultRow
 
@@ -272,23 +275,21 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		for _, test := range tests {
 			values = append(values, test.Value)
 		}
-		repeatability := math.Sqrt(calculateVariance(values))
-		grrPercentage := (repeatability / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
 		grp := (gr / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
 		results = append(results, ResultRow{
-			TaskDescription: fmt.Sprintf("%s-%s", parameterName, description),
-			LowerLimit:      tests[0].LowerLimit,
-			UpperLimit:      tests[0].UpperLimit,
-			GRRPercentage:   grrPercentage,
-			GRP:             grp,
+			TaskDescription:        fmt.Sprintf("%s-%s", parameterName, description),
+			LowerLimit:             tests[0].LowerLimit,
+			UpperLimit:             tests[0].UpperLimit,
+			Repeatability:          gr,
+			Reproducability:        0,
+			TotalGRR:               gr,
+			GRRTolerancePercentage: grp,
 		})
 	}
-
 	// Sort results by GRR percentage in descending order
 	sort.Slice(results, func(i, j int) bool {
-		return results[i].GRRPercentage > results[j].GRRPercentage
+		return results[i].GRRTolerancePercentage > results[j].GRRTolerancePercentage
 	})
-
 	// Write results to CSV
 	file, err := os.Create(outputFile)
 	if err != nil {
@@ -306,7 +307,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	}
 
 	// Write header
-	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "grr_percentage", "grp"})
+	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "Repeatability", "Reproducability", "TotalGRR", "GRRTolerancePercentage"})
 	if err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
@@ -317,9 +318,10 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 			row.TaskDescription,
 			fmt.Sprintf("%.2f", row.LowerLimit),
 			fmt.Sprintf("%.2f", row.UpperLimit),
-			fmt.Sprintf("%.2f", row.GRRPercentage),
-			fmt.Sprintf("%.4f", row.GRP),
-			gitHash,
+			fmt.Sprintf("%.2f", row.Repeatability),
+			fmt.Sprintf("%.2f", row.Reproducability),
+			fmt.Sprintf("%.2f", row.TotalGRR),
+			fmt.Sprintf("%.2f", row.GRRTolerancePercentage),
 		})
 		if err != nil {
 			return fmt.Errorf("error writing row: %w", err)
@@ -340,7 +342,7 @@ func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
 	defer writer.Flush()
 
 	// Write header
-	err = writer.Write([]string{"serial_name", "parameter_name", "description", "comparator", "value", "lower_limit", "upper_limit"})
+	err = writer.Write([]string{"serial_name", "parameter_name", "description", "comparator", "value", "lower_limit", "upper_limit", "filename"})
 	if err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
@@ -356,6 +358,7 @@ func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
 				fmt.Sprintf("%.2f", test.Value),
 				fmt.Sprintf("%.2f", test.LowerLimit),
 				fmt.Sprintf("%.2f", test.UpperLimit),
+				test.Filename,
 			})
 			if err != nil {
 				return fmt.Errorf("error writing row: %w", err)
