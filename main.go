@@ -110,77 +110,6 @@ func getCSVFiles(dir string) ([]string, error) {
 	return csvFiles, err
 }
 
-func processCSV(filePath string, serialName string) ([]TestRow, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open file: %w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("error reading CSV: %w", err)
-	}
-
-	if len(records) < 2 {
-		return nil, fmt.Errorf("CSV file must contain a header and at least one row of data")
-	}
-
-	// Get column indices
-	headers := records[0]
-	parameterNameIdx := indexOf(headers, "parameter_name")
-	descriptionIdx := indexOf(headers, "description")
-	comparatorIdx := indexOf(headers, "comparator")
-	valueIdx := indexOf(headers, "value")
-	lowerLimitIdx := indexOf(headers, "lower_limit")
-	upperLimitIdx := indexOf(headers, "upper_limit")
-
-	if parameterNameIdx == -1 || descriptionIdx == -1 || comparatorIdx == -1 || valueIdx == -1 || lowerLimitIdx == -1 || upperLimitIdx == -1 {
-		return nil, fmt.Errorf("missing required columns in file: %s", filePath)
-	}
-
-	// Parse rows
-	var tests []TestRow
-	for i, record := range records[1:] {
-		if len(record) < len(headers) {
-			log.Printf("Skipping row %d in %s: incomplete data", i+2, filePath)
-			continue
-		}
-
-		value, err := strconv.ParseFloat(record[valueIdx], 64)
-		if err != nil {
-			log.Printf("Skipping row %d in %s: invalid value", i+2, filePath)
-			continue
-		}
-
-		lowerLimit, err := strconv.ParseFloat(record[lowerLimitIdx], 64)
-		if err != nil {
-			log.Printf("Skipping row %d in %s: invalid lower limit", i+2, filePath)
-			continue
-		}
-
-		upperLimit, err := strconv.ParseFloat(record[upperLimitIdx], 64)
-		if err != nil {
-			log.Printf("Skipping row %d in %s: invalid upper limit", i+2, filePath)
-			continue
-		}
-
-		tests = append(tests, TestRow{
-			parameterName: record[parameterNameIdx],
-			Description:   record[descriptionIdx],
-			Comparator:    record[comparatorIdx],
-			Value:         value,
-			LowerLimit:    lowerLimit,
-			UpperLimit:    upperLimit,
-			SerialName:    serialName,
-			Filename:      filePath,
-		})
-	}
-
-	return tests, nil
-}
-
 func indexOf(headers []string, column string) int {
 	for i, header := range headers {
 		if header == column {
@@ -191,7 +120,7 @@ func indexOf(headers []string, column string) int {
 }
 
 func extractSerialName(fileName string) string {
-	re := regexp.MustCompile(`_[a-zA-Z0-9]{14}_`)
+	re := regexp.MustCompile(`_[a-zA-Z0-9]{11}_`)
 	match := re.FindString(fileName)
 	if match != "" {
 		return strings.Trim(match, "_")
@@ -316,12 +245,12 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	for _, row := range results {
 		err = writer.Write([]string{
 			row.TaskDescription,
-			fmt.Sprintf("%.2f", row.LowerLimit),
-			fmt.Sprintf("%.2f", row.UpperLimit),
-			fmt.Sprintf("%.2f", row.Repeatability),
-			fmt.Sprintf("%.2f", row.Reproducability),
-			fmt.Sprintf("%.2f", row.TotalGRR),
-			fmt.Sprintf("%.2f", row.GRRTolerancePercentage),
+			fmt.Sprintf("%.5f", row.LowerLimit),
+			fmt.Sprintf("%.5f", row.UpperLimit),
+			fmt.Sprintf("%.5f", row.Repeatability),
+			fmt.Sprintf("%.5f", row.Reproducability),
+			fmt.Sprintf("%.5f", row.TotalGRR),
+			fmt.Sprintf("%.5f", row.GRRTolerancePercentage),
 		})
 		if err != nil {
 			return fmt.Errorf("error writing row: %w", err)
@@ -392,4 +321,81 @@ func min(values []float64) float64 {
 		}
 	}
 	return minVal
+}
+func processCSV(filePath string, serialName string) ([]TestRow, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("unable to open file: %w", err)
+	}
+	defer file.Close()
+
+	reader := csv.NewReader(file)
+	records, err := reader.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("error reading CSV: %w", err)
+	}
+
+	if len(records) < 2 {
+		return nil, fmt.Errorf("CSV file must contain a header and at least one row of data")
+	}
+
+	// Get column indices
+	headers := records[0]
+	parameterNameIdx := indexOf(headers, "parameter_name")
+	descriptionIdx := indexOf(headers, "description")
+	comparatorIdx := indexOf(headers, "comparator")
+	valueIdx := indexOf(headers, "value")
+	lowerLimitIdx := indexOf(headers, "lower_limit")
+	upperLimitIdx := indexOf(headers, "upper_limit")
+
+	if parameterNameIdx == -1 || descriptionIdx == -1 || comparatorIdx == -1 || valueIdx == -1 || lowerLimitIdx == -1 || upperLimitIdx == -1 {
+		return nil, fmt.Errorf("missing required columns in file: %s", filePath)
+	}
+
+	// Compile regex to remove unwanted characters
+	re := regexp.MustCompile(`[0-9.\s\\/:"*?<>|]+`)
+
+	// Parse rows
+	var tests []TestRow
+	for i, record := range records[1:] {
+		if len(record) < len(headers) {
+			log.Printf("Skipping row %d in %s: incomplete data", i+2, filePath)
+			continue
+		}
+
+		// Clean the parameter_name and description fields
+		parameterName := re.ReplaceAllString(record[parameterNameIdx], "")
+		description := re.ReplaceAllString(record[descriptionIdx], "")
+
+		value, err := strconv.ParseFloat(record[valueIdx], 64)
+		if err != nil {
+			log.Printf("Skipping row %d in %s: invalid value", i+2, filePath)
+			continue
+		}
+
+		lowerLimit, err := strconv.ParseFloat(record[lowerLimitIdx], 64)
+		if err != nil {
+			log.Printf("Skipping row %d in %s: invalid lower limit", i+2, filePath)
+			continue
+		}
+
+		upperLimit, err := strconv.ParseFloat(record[upperLimitIdx], 64)
+		if err != nil {
+			log.Printf("Skipping row %d in %s: invalid upper limit", i+2, filePath)
+			continue
+		}
+
+		tests = append(tests, TestRow{
+			parameterName: parameterName,
+			Description:   description,
+			Comparator:    record[comparatorIdx],
+			Value:         value,
+			LowerLimit:    lowerLimit,
+			UpperLimit:    upperLimit,
+			SerialName:    serialName,
+			Filename:      filePath,
+		})
+	}
+
+	return tests, nil
 }
