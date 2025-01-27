@@ -307,7 +307,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	}
 
 	// Write header
-	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "Repeatability", "Reproducability", "TotalGRR", "GRRTolerancePercentage"})
+	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "Repeatability [units]", "Reproducability [units]", "TotalGRR [units]", "GRRTolerancePercentage [%]"})
 	if err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
