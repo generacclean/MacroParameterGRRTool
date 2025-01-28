@@ -24,7 +24,9 @@ type TestRow struct {
 	Filename      string
 }
 
-const d2 = 2.353   // For one operator,5 parts, 6 runs, d2 = 2.353 https://andrewmilivojevich.com/d2-values-for-the-distribution-of-the-average-range/
+const d2 = 2.353 // For one operator,5 parts, 6 runs, d2 = 2.353 https://andrewmilivojevich.com/d2-values-for-the-distribution-of-the-average-range/
+const snreg = `_[a-zA-Z0-9]{11}_`
+
 var gitHash string // Git hash, set during build or retrieved at runtime
 
 func main() {
@@ -120,7 +122,7 @@ func indexOf(headers []string, column string) int {
 }
 
 func extractSerialName(fileName string) string {
-	re := regexp.MustCompile(`_[a-zA-Z0-9]{11}_`)
+	re := regexp.MustCompile(snreg)
 	match := re.FindString(fileName)
 	if match != "" {
 		return strings.Trim(match, "_")
