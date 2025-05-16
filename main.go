@@ -90,7 +90,7 @@ func main() {
 }
 
 func getGitHash() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd := exec.Command("git", "describe", "--tags", "--dirty", "--always", "--long")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("error retrieving git hash: %w", err)
@@ -128,15 +128,6 @@ func extractSerialName(fileName string) string {
 		return strings.Trim(match, "_")
 	}
 	return ""
-}
-
-func calculateVariance(values []float64) float64 {
-	mean := calculateMean(values)
-	var sum float64
-	for _, v := range values {
-		sum += (v - mean) * (v - mean)
-	}
-	return sum / float64(len(values))
 }
 
 func calculateMean(values []float64) float64 {
@@ -355,7 +346,7 @@ func processCSV(filePath string, serialName string) ([]TestRow, error) {
 	}
 
 	// Compile regex to remove unwanted characters
-	re := regexp.MustCompile(`[0-9.\s\\/:"*?<>|]+`)
+	re := regexp.MustCompile(`[\s\\/:"*?<>|]+`)
 
 	// Parse rows
 	var tests []TestRow

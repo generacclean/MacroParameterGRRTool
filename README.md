@@ -25,7 +25,7 @@ This Go application processes multiple CSV files containing test data, performs 
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/grr-analysis-tool.git
+   git clone git@github.com:generacclean/MacroParameterGRRTool.git
    cd grr-analysis-tool
    ```
 2. Build the application:
