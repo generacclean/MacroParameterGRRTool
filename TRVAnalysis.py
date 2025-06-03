@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Define the CSV file path
-file_path = 'raw_data.csv'
+file_path = 'data_filtered.csv'
 
 # Histogram bin count
 BIN_COUNT = 50
@@ -12,10 +12,22 @@ BIN_COUNT = 50
 # Read the CSV file into a pandas DataFrame
 df = pd.read_csv(file_path)
 
+# Map the column names to match what the script expects
+column_mapping = {
+    'serial_num': 'serial_name',
+    'param_value_float': 'value'
+}
+
+# Rename columns if they exist
+for old_col, new_col in column_mapping.items():
+    if old_col in df.columns:
+        df = df.rename(columns={old_col: new_col})
+
 # Ensure required columns exist
 required_columns = ['serial_name', 'parameter_name', 'description', 'value', 'lower_limit', 'upper_limit']
 if not all(col in df.columns for col in required_columns):
-    raise ValueError(f"The CSV file must contain the following columns: {required_columns}")
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    raise ValueError(f"The CSV file is missing the following columns: {missing_columns}")
 
 # Group by 'parameter_name' and 'description'
 groups = df.groupby(['parameter_name', 'description'])
@@ -90,7 +102,7 @@ for (param, desc), group in groups:
         plt.tight_layout()
         plt.savefig(os.path.join(output_folder, filename))
         plt.close()
-    except:
-        print("error on i:"+serial_name)
+    except Exception as e:
+        print(f"Error saving plot for {param} - {desc}: {str(e)}")
 
 print(f"Scatter plots and histograms have been saved to the folder: {output_folder}")
