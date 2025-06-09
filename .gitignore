@@ -4,3 +4,4 @@ scatter_plots/
 venv/
 grr_summary*
 *.zip
+.*
