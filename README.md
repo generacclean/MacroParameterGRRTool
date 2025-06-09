@@ -90,7 +90,7 @@ where
     trn.serial_num in ('CE251950AFA', 'CE251950AD2', 'CE251950A8B', 'CE251950A8C', 'CE251950AE4', 'CE251950AB5')
     and pon.comparator like 'GELE'
     and pon.lower_limit != pon.upper_limit 
-    and trn.result like "pass"
+    and trn.result like 'pass'
 ```
 
 ### Important Requirements
