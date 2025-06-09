@@ -26,7 +26,7 @@ The tool:
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone git@github.com:generacclean/MacroParameterGRRTool.git
    cd MacroParameterGRRTool
    ```
 
@@ -55,7 +55,8 @@ The tool:
 3. The tool will generate:
    - `data_filtered.csv`: Contains the filtered test data
    - `grr_summary.csv`: Contains the GRR analysis results
-   - TRV Analysis results (if Python environment is set up)
+   - Scatter plots of each parameter
+   - Zip file named of the tester with the raw, filtered, summary, and scatter plots.
 
 Note: If you see a warning about TRV Analysis failing, make sure you have:
 1. Created and activated the Python virtual environment
@@ -110,7 +111,6 @@ The current d2 value (2.353) is set for the standard GRR configuration of:
 
 If your GRR configuration is different, you'll need to update the d2 constant in `main.go`. You can find the appropriate d2 value from the d2_Lookup table based on your specific configuration:
 - Number of parts (units)
-- Number of operators
 - Number of measurements per part
 
 To update the d2 constant:
@@ -118,36 +118,6 @@ To update the d2 constant:
 2. Find the line: `const d2 = 2.353`
 3. Replace 2.353 with the appropriate value from the d2_Lookup table
 4. Save and recompile the tool
-
-## Output
-
-The tool generates two CSV files:
-
-### data_filtered.csv
-Contains the filtered test data, keeping:
-- Only passing tests
-- Latest 6 unique test IDs per serial number
-- All parameter rows for the selected test IDs
-
-### grr_summary.csv
-Contains the GRR analysis results with columns:
-- parameter_name-description: Combined parameter identifier
-- lower_limit: Lower specification limit
-- upper_limit: Upper specification limit
-- Repeatability [units]: Measurement of variation when one operator measures the same part multiple times
-- Reproducability [units]: Measurement of variation when different operators measure the same part
-- TotalGRR [units]: Combined repeatability and reproducibility
-- GRRTolerancePercentage [%]: GRR as a percentage of the tolerance range
-
-### TRV Analysis Results
-The TRV Analysis script processes the filtered data and generates additional analysis results.
-
-## Building
-
-To build the tool:
-```bash
-go build
-```
 
 ## Troubleshooting
 
