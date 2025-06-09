@@ -32,6 +32,22 @@ const snreg = `_[a-zA-Z0-9]{11}_`
 var gitHash string // Git hash, set during build or retrieved at runtime
 
 func main() {
+	// Clean up existing output files and directories
+	filesToRemove := []string{
+		"data_filtered.csv",
+		"grr_summary.csv",
+	}
+	for _, file := range filesToRemove {
+		if err := os.Remove(file); err != nil && !os.IsNotExist(err) {
+			log.Printf("Warning: Could not remove existing file %s: %v", file, err)
+		}
+	}
+
+	// Remove scatter_plots directory and its contents
+	if err := os.RemoveAll("scatter_plots"); err != nil && !os.IsNotExist(err) {
+		log.Printf("Warning: Could not remove existing scatter_plots directory: %v", err)
+	}
+
 	// Check if the Git hash is set during build
 	if gitHash == "" {
 		// Attempt to retrieve the Git hash at runtime
@@ -79,6 +95,7 @@ func main() {
 		"filename":       {"test_id", "pon.test_id"},
 		"result":         {"result", "pon.result"},
 		"test_time":      {"test_start_time", "start_time"}, // Add test time column
+		"tester_name":    {"tester_name"},
 	}
 
 	// Find column indices with flexible matching
@@ -375,25 +392,24 @@ func main() {
 		fmt.Println("TRV Analysis completed successfully")
 	}
 
-	// Get actor name from the data (should be consistent)
+	// Get actor name from tester_name column
 	var actorName string
-	for _, tests := range groupedTests {
-		for _, test := range tests {
-			// Extract actor name from test_id (assuming format contains actor name)
-			parts := strings.Split(test.Filename, "_")
-			if len(parts) > 0 {
-				if actorName == "" {
-					actorName = parts[0]
-				} else if actorName != parts[0] {
-					log.Fatalf("Inconsistent actor names found: %s vs %s", actorName, parts[0])
-				}
+	for _, record := range records[1:] { // Skip header
+		if len(record) < len(headers) {
+			continue
+		}
+		testerName := strings.TrimSpace(record[columnIndices["tester_name"]])
+		if testerName != "" {
+			if actorName == "" {
+				actorName = testerName
+			} else if actorName != testerName {
+				log.Fatalf("Inconsistent tester names found: %s vs %s", actorName, testerName)
 			}
 		}
-		break // Only need to check first group
 	}
 
 	if actorName == "" {
-		log.Fatal("Could not determine actor name from test data")
+		log.Fatal("Could not determine actor name from tester_name column")
 	}
 
 	// Create zip file
