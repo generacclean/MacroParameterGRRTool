@@ -3,13 +3,13 @@ package main
 import (
 	"archive/zip"
 	"encoding/csv"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +32,11 @@ const snreg = `_[a-zA-Z0-9]{11}_`
 var gitHash string // Git hash, set during build or retrieved at runtime
 
 func main() {
+	// Add force flag
+	var forceFlag bool
+	flag.BoolVar(&forceFlag, "f", false, "Force processing by ignoring limit consistency checks")
+	flag.Parse()
+
 	// Clean up existing output files and directories
 	filesToRemove := []string{
 		"data_filtered.csv",
@@ -358,13 +363,25 @@ func main() {
 		}
 	}
 
-	// Second pass: verify limits
-	for paramKey, limits := range parameterChecks {
-		if len(limits.upperLimits) > 1 {
-			log.Fatalf("Inconsistent upper limits found for parameter %s: %v", paramKey, limits.upperLimits)
+	// Second pass: verify limits (only if force flag is not set)
+	if !forceFlag {
+		for paramKey, limits := range parameterChecks {
+			if len(limits.upperLimits) > 1 {
+				log.Fatalf("Inconsistent upper limits found for parameter %s: %v", paramKey, limits.upperLimits)
+			}
+			if len(limits.lowerLimits) > 1 {
+				log.Fatalf("Inconsistent lower limits found for parameter %s: %v", paramKey, limits.lowerLimits)
+			}
 		}
-		if len(limits.lowerLimits) > 1 {
-			log.Fatalf("Inconsistent lower limits found for parameter %s: %v", paramKey, limits.lowerLimits)
+	} else {
+		// If force flag is set, just log a warning about inconsistent limits
+		for paramKey, limits := range parameterChecks {
+			if len(limits.upperLimits) > 1 {
+				log.Printf("Warning: Inconsistent upper limits found for parameter %s: %v", paramKey, limits.upperLimits)
+			}
+			if len(limits.lowerLimits) > 1 {
+				log.Printf("Warning: Inconsistent lower limits found for parameter %s: %v", paramKey, limits.lowerLimits)
+			}
 		}
 	}
 
@@ -454,20 +471,6 @@ func getGitHash() (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func getCSVFiles(dir string) ([]string, error) {
-	var csvFiles []string
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasSuffix(d.Name(), ".csv") {
-			csvFiles = append(csvFiles, path)
-		}
-		return nil
-	})
-	return csvFiles, err
-}
-
 func indexOf(headers []string, column string) int {
 	for i, header := range headers {
 		if header == column {
@@ -477,22 +480,6 @@ func indexOf(headers []string, column string) int {
 	return -1
 }
 
-func extractSerialName(fileName string) string {
-	re := regexp.MustCompile(snreg)
-	match := re.FindString(fileName)
-	if match != "" {
-		return strings.Trim(match, "_")
-	}
-	return ""
-}
-
-func calculateMean(values []float64) float64 {
-	sum := 0.0
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
-}
 func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) error {
 	// Get the Git hash
 	gitHash, err := getGitHash()
@@ -609,43 +596,6 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	return nil
 }
 
-func writeRawData(outputFile string, groupedTests map[string][]TestRow) error {
-	file, err := os.Create(outputFile)
-	if err != nil {
-		return fmt.Errorf("unable to create output file: %w", err)
-	}
-	defer file.Close()
-
-	writer := csv.NewWriter(file)
-	defer writer.Flush()
-
-	// Write header
-	err = writer.Write([]string{"serial_name", "parameter_name", "description", "comparator", "value", "lower_limit", "upper_limit", "filename"})
-	if err != nil {
-		return fmt.Errorf("error writing header: %w", err)
-	}
-
-	// Write all raw data rows
-	for _, tests := range groupedTests {
-		for _, test := range tests {
-			err = writer.Write([]string{
-				test.SerialName,
-				test.parameterName,
-				test.Description,
-				test.Comparator,
-				fmt.Sprintf("%.2f", test.Value),
-				fmt.Sprintf("%.2f", test.LowerLimit),
-				fmt.Sprintf("%.2f", test.UpperLimit),
-				test.Filename,
-			})
-			if err != nil {
-				return fmt.Errorf("error writing row: %w", err)
-			}
-		}
-	}
-
-	return nil
-}
 func max(values []float64) float64 {
 	if len(values) == 0 {
 		log.Fatal("max: slice is empty")
@@ -670,83 +620,6 @@ func min(values []float64) float64 {
 		}
 	}
 	return minVal
-}
-func processCSV(filePath string, serialName string) ([]TestRow, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("unable to open file: %w", err)
-	}
-	defer file.Close()
-
-	reader := csv.NewReader(file)
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, fmt.Errorf("error reading CSV: %w", err)
-	}
-
-	if len(records) < 2 {
-		return nil, fmt.Errorf("CSV file must contain a header and at least one row of data")
-	}
-
-	// Get column indices
-	headers := records[0]
-	parameterNameIdx := indexOf(headers, "parameter_name")
-	descriptionIdx := indexOf(headers, "description")
-	comparatorIdx := indexOf(headers, "comparator")
-	valueIdx := indexOf(headers, "value")
-	lowerLimitIdx := indexOf(headers, "lower_limit")
-	upperLimitIdx := indexOf(headers, "upper_limit")
-
-	if parameterNameIdx == -1 || descriptionIdx == -1 || comparatorIdx == -1 || valueIdx == -1 || lowerLimitIdx == -1 || upperLimitIdx == -1 {
-		return nil, fmt.Errorf("missing required columns in file: %s", filePath)
-	}
-
-	// Compile regex to remove unwanted characters
-	re := regexp.MustCompile(`[\s\\/:"*?<>|]+`)
-
-	// Parse rows
-	var tests []TestRow
-	for i, record := range records[1:] {
-		if len(record) < len(headers) {
-			log.Printf("Skipping row %d in %s: incomplete data", i+2, filePath)
-			continue
-		}
-
-		// Clean the parameter_name and description fields
-		parameterName := re.ReplaceAllString(record[parameterNameIdx], "")
-		description := re.ReplaceAllString(record[descriptionIdx], "")
-
-		value, err := strconv.ParseFloat(record[valueIdx], 64)
-		if err != nil {
-			log.Printf("Skipping row %d in %s: invalid value", i+2, filePath)
-			continue
-		}
-
-		lowerLimit, err := strconv.ParseFloat(record[lowerLimitIdx], 64)
-		if err != nil {
-			log.Printf("Skipping row %d in %s: invalid lower limit", i+2, filePath)
-			continue
-		}
-
-		upperLimit, err := strconv.ParseFloat(record[upperLimitIdx], 64)
-		if err != nil {
-			log.Printf("Skipping row %d in %s: invalid upper limit", i+2, filePath)
-			continue
-		}
-
-		tests = append(tests, TestRow{
-			parameterName: parameterName,
-			Description:   description,
-			Comparator:    record[comparatorIdx],
-			Value:         value,
-			LowerLimit:    lowerLimit,
-			UpperLimit:    upperLimit,
-			SerialName:    serialName,
-			Filename:      filePath,
-		})
-	}
-
-	return tests, nil
 }
 
 // Helper function to add a file to zip
