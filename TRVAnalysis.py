@@ -42,17 +42,29 @@ for (param, desc), group in groups:
     # Calculate the y-axis limits based on lower and upper limits
     upper_limit = group['upper_limit'].iloc[0]  # Assuming limits are consistent within a group
     lower_limit = group['lower_limit'].iloc[0]
+    
+    # Check for inverted limits and warn
+    if lower_limit > upper_limit:
+        print(f"Warning: Inverted limits found for {param} - {desc}: lower_limit ({lower_limit}) > upper_limit ({upper_limit})")
+        lower_limit, upper_limit = upper_limit, lower_limit
+    
     y_min = lower_limit - (upper_limit - lower_limit) * 0.1
     y_max = upper_limit + (upper_limit - lower_limit) * 0.1
 
     # Scatter plot (left subplot)
     ax_scatter = axes[0]
+    
+    # Create a list of unique serial names for x-axis
+    unique_serials = sorted(group['serial_name'].unique())
+    serial_to_x = {serial: i for i, serial in enumerate(unique_serials)}
+    
     for serial_name, serial_group in group.groupby('serial_name'):
-        values = serial_group['value']
+        values = pd.to_numeric(serial_group['value'], errors='coerce')
+        x_pos = serial_to_x[serial_name]
         
         # Filter the values that are within bounds
         in_bounds = values[(values <= y_max) & (values >= y_min)]
-        x_positions = [serial_name] * len(in_bounds)  # Match the length of x_positions to in-bounds values
+        x_positions = [x_pos] * len(in_bounds)
 
         # Plot in-bounds values
         ax_scatter.scatter(x_positions, in_bounds, alpha=0.7)
@@ -62,9 +74,13 @@ for (param, desc), group in groups:
         out_of_bounds_bottom = values[values < y_min]
 
         for _ in out_of_bounds_top:
-            ax_scatter.text(serial_name, y_max * 0.98, '^', fontsize=12, ha='center', va='bottom', color='blue')
+            ax_scatter.text(x_pos, y_max * 0.98, '^', fontsize=12, ha='center', va='bottom', color='blue')
         for _ in out_of_bounds_bottom:
-            ax_scatter.text(serial_name, y_min * 1.02, 'v', fontsize=12, ha='center', va='top', color='blue')
+            ax_scatter.text(x_pos, y_min * 1.02, 'v', fontsize=12, ha='center', va='top', color='blue')
+
+    # Set x-axis ticks and labels
+    ax_scatter.set_xticks(range(len(unique_serials)))
+    ax_scatter.set_xticklabels(unique_serials, rotation=45)
 
     # Add horizontal lines for 'upper_limit' and 'lower_limit'
     ax_scatter.axhline(y=upper_limit, color='red', linestyle='--')

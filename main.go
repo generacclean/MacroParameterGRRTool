@@ -28,6 +28,7 @@ type TestRow struct {
 
 const d2 = 2.558 // Use the d2_Lookup table to get the correct value
 const snreg = `_[a-zA-Z0-9]{11}_`
+const maxTestRuns = 10 // Maximum number of test runs to keep per serial number
 
 var gitHash string // Git hash, set during build or retrieved at runtime
 
@@ -163,13 +164,13 @@ func main() {
 		// Initialize map for this serial number
 		selectedTestIDs[serialNum] = make(map[string]bool)
 
-		// Select the latest 6 unique test IDs
+		// Select the latest unique test IDs
 		uniqueTestIDs := make(map[string]bool)
 		for _, test := range tests {
 			if !uniqueTestIDs[test.testID] {
 				uniqueTestIDs[test.testID] = true
 				selectedTestIDs[serialNum][test.testID] = true
-				if len(uniqueTestIDs) >= 6 {
+				if len(uniqueTestIDs) >= maxTestRuns {
 					break
 				}
 			}
@@ -207,10 +208,11 @@ func main() {
 			uniqueTestIDs[test.testID] = true
 		}
 		keptTestIDs := len(selectedTestIDs[serialNum])
-		fmt.Printf("Serial %s: %d unique passing test IDs found, %d kept\n",
+		fmt.Printf("Serial %s: %d unique passing test IDs found, %d kept (max %d)\n",
 			serialNum,
 			len(uniqueTestIDs),
-			keptTestIDs)
+			keptTestIDs,
+			maxTestRuns)
 	}
 
 	// Now process the filtered data
@@ -305,7 +307,7 @@ func main() {
 		}
 
 		if test.Comparator == "GELE" {
-			key := fmt.Sprintf("%s|%s", test.parameterName, test.Description)
+			key := test.parameterName
 			groupedTests[key] = append(groupedTests[key], test)
 			processedRows++
 		} else {
@@ -351,7 +353,7 @@ func main() {
 	// First pass: collect all unique limits for each parameter
 	for _, tests := range groupedTests {
 		for _, test := range tests {
-			key := fmt.Sprintf("%s-%s", test.parameterName, test.Description)
+			key := test.parameterName
 			if _, exists := parameterChecks[key]; !exists {
 				parameterChecks[key] = &ParameterLimits{
 					upperLimits: make(map[float64]bool),
@@ -411,6 +413,7 @@ func main() {
 
 	// Get actor name from tester_name column
 	var actorName string
+	var warnedAboutTesterNames bool
 	for _, record := range records[1:] { // Skip header
 		if len(record) < len(headers) {
 			continue
@@ -419,8 +422,10 @@ func main() {
 		if testerName != "" {
 			if actorName == "" {
 				actorName = testerName
-			} else if actorName != testerName {
-				log.Fatalf("Inconsistent tester names found: %s vs %s", actorName, testerName)
+			} else if actorName != testerName && !warnedAboutTesterNames {
+				log.Printf("Warning: Inconsistent tester names found: %s vs %s", actorName, testerName)
+				warnedAboutTesterNames = true
+				// Use the first encountered name
 			}
 		}
 	}
@@ -490,6 +495,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	// Temporary storage for sorted data
 	type ResultRow struct {
 		TaskDescription        string
+		Count                  int
 		LowerLimit             float64
 		UpperLimit             float64
 		Repeatability          float64
@@ -501,11 +507,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 
 	// Group and calculate GR&R
 	for key, tests := range groupedTests {
-		parts := strings.Split(key, "|")
-		if len(parts) != 2 {
-			return fmt.Errorf("invalid key format: %s", key)
-		}
-		parameterName, description := parts[0], parts[1]
+		parameterName := key
 
 		// Group by serial name and calculate ranges
 		serialRanges := make(map[string]float64)
@@ -542,7 +544,8 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		}
 		grp := (gr / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
 		results = append(results, ResultRow{
-			TaskDescription:        fmt.Sprintf("%s-%s", parameterName, description),
+			TaskDescription:        parameterName,
+			Count:                  len(tests),
 			LowerLimit:             tests[0].LowerLimit,
 			UpperLimit:             tests[0].UpperLimit,
 			Repeatability:          gr,
@@ -572,7 +575,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	}
 
 	// Write header
-	err = writer.Write([]string{"parameter_name-description", "lower_limit", "upper_limit", "Repeatability [units]", "Reproducability [units]", "TotalGRR [units]", "GRRTolerancePercentage [%]"})
+	err = writer.Write([]string{"parameter_name", "count", "lower_limit", "upper_limit", "Repeatability [units]", "Reproducability [units]", "TotalGRR [units]", "GRRTolerancePercentage [%]"})
 	if err != nil {
 		return fmt.Errorf("error writing header: %w", err)
 	}
@@ -581,6 +584,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 	for _, row := range results {
 		err = writer.Write([]string{
 			row.TaskDescription,
+			fmt.Sprintf("%d", row.Count),
 			fmt.Sprintf("%.5f", row.LowerLimit),
 			fmt.Sprintf("%.5f", row.UpperLimit),
 			fmt.Sprintf("%.5f", row.Repeatability),
