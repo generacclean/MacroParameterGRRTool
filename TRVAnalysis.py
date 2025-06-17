@@ -2,12 +2,22 @@ import os
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import re
 
 # Define the CSV file path
 file_path = 'data_filtered.csv'
 
-# Histogram bin count
-BIN_COUNT = 50
+# Bin size as fraction of tolerance range
+BIN_SIZE_FRACTION = 1/20
+
+def sanitize_filename(filename):
+    # Replace any non-alphanumeric characters (except underscores) with underscores
+    sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', filename)
+    # Replace multiple consecutive underscores with a single one
+    sanitized = re.sub(r'_+', '_', sanitized)
+    # Remove leading/trailing underscores
+    sanitized = sanitized.strip('_')
+    return sanitized
 
 # Read the CSV file into a pandas DataFrame
 df = pd.read_csv(file_path)
@@ -29,14 +39,18 @@ if not all(col in df.columns for col in required_columns):
     missing_columns = [col for col in required_columns if col not in df.columns]
     raise ValueError(f"The CSV file is missing the following columns: {missing_columns}")
 
-# Group by 'parameter_name' and 'description'
-groups = df.groupby(['parameter_name', 'description'])
+# Group by 'parameter_name' only and get the first description for each parameter
+groups = df.groupby('parameter_name')
+first_descriptions = df.groupby('parameter_name')['description'].first()
 
-# Create a scatter plot and histogram for each combination of 'parameter_name' and 'description'
+# Create a scatter plot and histogram for each parameter
 output_folder = 'scatter_plots'
 os.makedirs(output_folder, exist_ok=True)
 
-for (param, desc), group in groups:
+for param, group in groups:
+    # Get the first description for this parameter
+    desc = first_descriptions[param]
+    
     fig, axes = plt.subplots(1, 2, figsize=(16, 6), gridspec_kw={'width_ratios': [2, 1]})
 
     # Calculate the y-axis limits based on lower and upper limits
@@ -45,7 +59,7 @@ for (param, desc), group in groups:
     
     # Check for inverted limits and warn
     if lower_limit > upper_limit:
-        print(f"Warning: Inverted limits found for {param} - {desc}: lower_limit ({lower_limit}) > upper_limit ({upper_limit})")
+        print(f"Warning: Inverted limits found for {param}: lower_limit ({lower_limit}) > upper_limit ({upper_limit})")
         lower_limit, upper_limit = upper_limit, lower_limit
     
     y_min = lower_limit - (upper_limit - lower_limit) * 0.1
@@ -98,23 +112,49 @@ for (param, desc), group in groups:
 
     # Histogram (right subplot)
     ax_hist = axes[1]
-    # Ensure bins are valid and monotonically increasing
-    bins = np.linspace(y_min, y_max, BIN_COUNT + 1)
-    if len(bins) > 1 and np.all(np.diff(bins) > 0):
-        ax_hist.hist(group['value'], bins=bins, orientation='horizontal', color='gray', edgecolor='black', alpha=0.7)
+    
+    # Convert values to numeric and handle any invalid values
+    values = pd.to_numeric(group['value'], errors='coerce')
+    values = values.dropna()  # Remove any NaN values
+    
+    if len(values) > 0:
+        # Calculate bin size based on tolerance range
+        tolerance_range = upper_limit - lower_limit
+        bin_size = tolerance_range * BIN_SIZE_FRACTION
+        
+        # Calculate number of bins needed to cover the full range
+        # Add extra bins on each side to show out-of-spec values
+        range_to_cover = y_max - y_min
+        num_bins = int(np.ceil(range_to_cover / bin_size))
+        
+        # Create bins
+        bins = np.linspace(y_min, y_max, num_bins + 1)
+        
+        # Plot histogram
+        ax_hist.hist(values, bins=bins, orientation='horizontal', color='gray', edgecolor='black', alpha=0.7)
+        
+        # Add horizontal lines for 'upper_limit' and 'lower_limit' on histogram
+        ax_hist.axhline(y=upper_limit, color='red', linestyle='--')
+        ax_hist.axhline(y=lower_limit, color='red', linestyle='--')
+        ax_hist.set_ylim(y_min, y_max)
+        
+        # Set labels and title for histogram
+        ax_hist.set_title("Histogram")
+        ax_hist.set_xlabel("Frequency")
+        ax_hist.set_ylabel("Value")
+        ax_hist.grid(True, linestyle='--', alpha=0.5)
+    else:
+        ax_hist.text(0.5, 0.5, "No valid data for histogram", 
+                    horizontalalignment='center', verticalalignment='center',
+                    transform=ax_hist.transAxes)
+        ax_hist.set_title("Histogram (No Data)")
+        ax_hist.set_xlabel("Frequency")
+        ax_hist.set_ylabel("Value")
 
-    # Add horizontal lines for 'upper_limit' and 'lower_limit' on histogram
-    ax_hist.axhline(y=upper_limit, color='red', linestyle='--')
-    ax_hist.axhline(y=lower_limit, color='red', linestyle='--')
-    ax_hist.set_ylim(y_min, y_max)
-    # Set labels and title for histogram
-    ax_hist.set_title("Histogram")
-    ax_hist.set_xlabel("Frequency")
-    ax_hist.set_ylabel("Value")
-    ax_hist.grid(True, linestyle='--', alpha=0.5)
     try:
         # Save the plot
-        filename = f"{param}_{desc}.png".replace(" ", "_")
+        filename = f"{param}_{desc}.png"
+        filename = sanitize_filename(filename)
         plt.tight_layout()
         plt.savefig(os.path.join(output_folder, filename))
         plt.close()
