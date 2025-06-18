@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,7 @@ type TestRow struct {
 
 const d2 = 2.558 // Use the d2_Lookup table to get the correct value
 const snreg = `_[a-zA-Z0-9]{11}_`
-const maxTestRuns = 10 // Maximum number of test runs to keep per serial number
+const maxTestRuns = 6 // Maximum number of test runs to keep per serial number
 
 var gitHash string // Git hash, set during build or retrieved at runtime
 
@@ -542,7 +543,7 @@ func writeGroupedResults(outputFile string, groupedTests map[string][]TestRow) e
 		for _, test := range tests {
 			values = append(values, test.Value)
 		}
-		grp := (gr / (tests[0].UpperLimit - tests[0].LowerLimit)) * 100
+		grp := (gr / math.Abs(tests[0].UpperLimit-tests[0].LowerLimit)) * 100
 		results = append(results, ResultRow{
 			TaskDescription:        parameterName,
 			Count:                  len(tests),
