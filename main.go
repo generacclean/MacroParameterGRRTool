@@ -27,9 +27,9 @@ type TestRow struct {
 	Filename      string
 }
 
-const d2 = 2.558 // Use the d2_Lookup table to get the correct value
+const d2 = 1.714 //2.558 // Use the d2_Lookup table to get the correct value
 const snreg = `_[a-zA-Z0-9]{11}_`
-const maxTestRuns = 6 // Maximum number of test runs to keep per serial number
+const maxTestRuns = 3 // Maximum number of test runs to keep per serial number
 
 var gitHash string // Git hash, set during build or retrieved at runtime
 
@@ -370,20 +370,20 @@ func main() {
 	if !forceFlag {
 		for paramKey, limits := range parameterChecks {
 			if len(limits.upperLimits) > 1 {
-				log.Fatalf("Inconsistent upper limits found for parameter %s: %v", paramKey, limits.upperLimits)
+				log.Fatalf("Inconsistent upper limits found for parameter %s: found %d distinct upper limits", paramKey, len(limits.upperLimits))
 			}
 			if len(limits.lowerLimits) > 1 {
-				log.Fatalf("Inconsistent lower limits found for parameter %s: %v", paramKey, limits.lowerLimits)
+				log.Fatalf("Inconsistent lower limits found for parameter %s: found %d distinct lower limits", paramKey, len(limits.lowerLimits))
 			}
 		}
 	} else {
 		// If force flag is set, just log a warning about inconsistent limits
 		for paramKey, limits := range parameterChecks {
 			if len(limits.upperLimits) > 1 {
-				log.Printf("Warning: Inconsistent upper limits found for parameter %s: %v", paramKey, limits.upperLimits)
+				log.Printf("Warning: Inconsistent upper limits found for parameter %s: found %d distinct upper limits", paramKey, len(limits.upperLimits))
 			}
 			if len(limits.lowerLimits) > 1 {
-				log.Printf("Warning: Inconsistent lower limits found for parameter %s: %v", paramKey, limits.lowerLimits)
+				log.Printf("Warning: Inconsistent lower limits found for parameter %s: found %d distinct lower limits", paramKey, len(limits.lowerLimits))
 			}
 		}
 	}
